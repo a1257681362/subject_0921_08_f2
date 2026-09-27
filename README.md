@@ -44,8 +44,22 @@
 | POST | `/api/orders/{id}/reschedule` | 改期（冲突自动顺延） |
 | GET | `/api/orders/search?orderNo=&date=` | 组合检索（至少一个条件） |
 | GET | `/api/orders?date=&status=` | 服务单列表 |
+| GET | `/api/trace/orders/{orderNo}` | 按工单号检索完整调用时序 |
 
 > 注：本期业务接口在 Shiro 中临时 `anon` 放行，登录模块落地后改回 `authc`。
+
+## F2 全链路追踪
+
+定位线上故障的路径：按工单号拉出调用时序 → 拿当次 traceId 回查日志。
+
+- **TraceId 全链路携带**：入口生成或透传请求头 `X-Trace-Id`（8~64 位字母数字/短横线，非法则重新生成），
+  响应头同名回带；日志每行带 `[traceId]`，入口到持久层（`t_trace_record`、`t_operation_log`）一路携带。
+- **异步接力**：`traceTaskExecutor` 线程池经 `TaskDecorator` 自动接力上下文（调用轨迹异步落库即走此路径）；
+  其他异步边界用 `TraceContext.wrap(Runnable)` 包装即可。
+- **按工单号检索调用时序**：`GET /api/trace/orders/{orderNo}` 按发生先后返回该工单的每次调用
+  （traceId / uri / 耗时 / 成败 / 失败原因），失败调用同样落轨迹。
+- **敏感字段打码**：日志输出经 `%mmsg` 转换器兜底打码（手机号 / 身份证）；操作留痕入库前同样打码。
+- 健康检查等探活接口不落调用轨迹，避免淹没主链路。
 
 
 

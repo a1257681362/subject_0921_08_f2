@@ -3,6 +3,7 @@ package com.evops.order;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.evops.common.BizConsts;
 import com.evops.common.VoidRequest;
+import com.evops.common.trace.TraceContext;
 import com.evops.order.dto.AssignRequest;
 import com.evops.order.dto.OrderSaveRequest;
 import com.evops.order.dto.OrderVO;
@@ -52,6 +53,7 @@ public class OrderService {
     }
 
     public OrderVO create(OrderSaveRequest req) {
+        TraceContext.bindOrderNo(req.getOrderNo());
         return idempotencyService.run(req.getRequestNo(), "ORDER_CREATE", OrderVO.class, () -> {
             Long exists = orderMapper.selectCount(Wrappers.<ServiceOrder>lambdaQuery()
                     .eq(ServiceOrder::getOrderNo, req.getOrderNo()));
@@ -73,6 +75,7 @@ public class OrderService {
     }
 
     public OrderVO update(Long id, OrderSaveRequest req) {
+        TraceContext.bindOrderNo(req.getOrderNo());
         return idempotencyService.run(req.getRequestNo(), "ORDER_UPDATE", OrderVO.class, () -> {
             ServiceOrder order = mustGetNormal(id);
             if (!BizConsts.ORDER_PENDING.equals(order.getStatus())) {
@@ -103,6 +106,7 @@ public class OrderService {
     public OrderVO voidOrder(Long id, VoidRequest req) {
         return idempotencyService.run(req.getRequestNo(), "ORDER_VOID", OrderVO.class, () -> {
             ServiceOrder order = mustGetNormal(id);
+            TraceContext.bindOrderNo(order.getOrderNo());
             order.setRecordStatus(BizConsts.RECORD_VOIDED);
             order.setLastRequestNo(req.getRequestNo());
             orderMapper.updateById(order);
@@ -116,6 +120,7 @@ public class OrderService {
     public OrderVO restore(Long id, VoidRequest req) {
         return idempotencyService.run(req.getRequestNo(), "ORDER_RESTORE", OrderVO.class, () -> {
             ServiceOrder order = mustGet(id);
+            TraceContext.bindOrderNo(order.getOrderNo());
             if (!BizConsts.RECORD_VOIDED.equals(order.getRecordStatus())) {
                 throw new IllegalArgumentException("单据未冲销，无需恢复");
             }
@@ -140,6 +145,7 @@ public class OrderService {
     public OrderVO assign(Long id, AssignRequest req) {
         return idempotencyService.run(req.getRequestNo(), "ORDER_ASSIGN", OrderVO.class, () -> {
             ServiceOrder order = mustGetNormal(id);
+            TraceContext.bindOrderNo(order.getOrderNo());
             if (!BizConsts.ORDER_PENDING.equals(order.getStatus())) {
                 throw new IllegalArgumentException("仅待派单状态可派单");
             }
@@ -161,6 +167,7 @@ public class OrderService {
     public OrderVO reschedule(Long id, RescheduleRequest req) {
         return idempotencyService.run(req.getRequestNo(), "ORDER_RESCHEDULE", OrderVO.class, () -> {
             ServiceOrder order = mustGetNormal(id);
+            TraceContext.bindOrderNo(order.getOrderNo());
             LocalDate from = order.getServiceDate();
             LocalDate actual = req.getServiceDate();
             String detail;
@@ -187,6 +194,7 @@ public class OrderService {
         if (!StringUtils.hasText(orderNo) && date == null) {
             throw new IllegalArgumentException("工单号与日期至少提供一个");
         }
+        TraceContext.bindOrderNo(orderNo);
         List<ServiceOrder> orders = orderMapper.selectList(Wrappers.<ServiceOrder>lambdaQuery()
                 .eq(StringUtils.hasText(orderNo), ServiceOrder::getOrderNo, orderNo)
                 .eq(date != null, ServiceOrder::getServiceDate, date)
@@ -196,7 +204,9 @@ public class OrderService {
     }
 
     public OrderVO get(Long id) {
-        return toVO(mustGet(id));
+        ServiceOrder order = mustGet(id);
+        TraceContext.bindOrderNo(order.getOrderNo());
+        return toVO(order);
     }
 
     public List<OrderVO> list(LocalDate date, String status) {

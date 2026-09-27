@@ -24,6 +24,7 @@ public class ShiroConfig {
         // TODO 登录模块落地后改回 authc；本期业务接口先放行便于联调
         chain.addPathDefinition("/api/staff/**", "anon");
         chain.addPathDefinition("/api/orders/**", "anon");
+        chain.addPathDefinition("/api/trace/**", "anon");
         chain.addPathDefinition("/**", "authc");
         return chain;
     }

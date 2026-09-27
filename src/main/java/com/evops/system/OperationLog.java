@@ -20,6 +20,8 @@ public class OperationLog {
     private String action;
     private String requestNo;
     private String detail;
+    /** 全链路 TraceId：操作留痕可回查当次调用的完整日志 */
+    private String traceId;
     private LocalDateTime createTime;
 
     public Long getId() {
@@ -68,6 +70,14 @@ public class OperationLog {
 
     public void setDetail(String detail) {
         this.detail = detail;
+    }
+
+    public String getTraceId() {
+        return traceId;
+    }
+
+    public void setTraceId(String traceId) {
+        this.traceId = traceId;
     }
 
     public LocalDateTime getCreateTime() {

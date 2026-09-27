@@ -1,9 +1,12 @@
 package com.evops.system;
 
+import com.evops.common.Masks;
+import com.evops.common.trace.TraceContext;
 import org.springframework.stereotype.Component;
 
 /**
  * 操作留痕：在业务事务内调用，随业务同生共死。
+ * 留痕携带当次调用的 TraceId；敏感字段入库前先打码。
  */
 @Component
 public class OperationLogger {
@@ -19,7 +22,8 @@ public class OperationLogger {
         log.setBizId(bizId);
         log.setAction(action);
         log.setRequestNo(requestNo);
-        log.setDetail(detail);
+        log.setDetail(Masks.maskText(detail));
+        log.setTraceId(TraceContext.traceId());
         operationLogMapper.insert(log);
     }
 }
