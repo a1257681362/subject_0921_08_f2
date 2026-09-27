@@ -30,5 +30,8 @@ mybatis-plus:
     map-underscore-to-camel-case: true
 
 logging:
+  pattern:
+    # 每行日志携带 traceId/orderNo：grep 工单号 → 得 traceId → 再 grep 出完整调用时序
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{traceId}] [%X{orderNo}] %logger{36} - %msg%n"
   level:
     com.evops: INFO

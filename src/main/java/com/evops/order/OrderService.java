@@ -2,7 +2,9 @@ package com.evops.order;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.evops.common.BizConsts;
+import com.evops.common.SensitiveMasker;
 import com.evops.common.VoidRequest;
+import com.evops.common.trace.TraceContext;
 import com.evops.order.dto.AssignRequest;
 import com.evops.order.dto.OrderSaveRequest;
 import com.evops.order.dto.OrderVO;
@@ -13,6 +15,8 @@ import com.evops.staff.StaffLeaveMapper;
 import com.evops.staff.StaffMapper;
 import com.evops.system.IdempotencyService;
 import com.evops.system.OperationLogger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -27,6 +31,7 @@ import java.util.stream.Collectors;
  */
 @Service
 public class OrderService {
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
     /** 改期自动顺延的最长查找天数 */
     private static final int MAX_POSTPONE_DAYS = 30;
 
@@ -52,6 +57,7 @@ public class OrderService {
     }
 
     public OrderVO create(OrderSaveRequest req) {
+        TraceContext.bindOrderNo(req.getOrderNo());
         return idempotencyService.run(req.getRequestNo(), "ORDER_CREATE", OrderVO.class, () -> {
             Long exists = orderMapper.selectCount(Wrappers.<ServiceOrder>lambdaQuery()
                     .eq(ServiceOrder::getOrderNo, req.getOrderNo()));
@@ -68,11 +74,17 @@ public class OrderService {
             insertItems(order.getId(), req.getItems());
             operationLogger.log("ORDER", order.getId(), "CREATE", req.getRequestNo(),
                     "新增服务单 " + order.getOrderNo());
+            log.info("创建服务单 orderNo={} 客户={} 电话={} 地址={} 日期={} 时段={} 明细数={}",
+                    order.getOrderNo(), SensitiveMasker.maskName(order.getCustomerName()),
+                    SensitiveMasker.maskPhone(order.getCustomerPhone()),
+                    SensitiveMasker.maskAddress(order.getAddress()),
+                    order.getServiceDate(), order.getTimeSlot(), req.getItems().size());
             return toVO(order);
         });
     }
 
     public OrderVO update(Long id, OrderSaveRequest req) {
+        TraceContext.bindOrderNo(req.getOrderNo());
         return idempotencyService.run(req.getRequestNo(), "ORDER_UPDATE", OrderVO.class, () -> {
             ServiceOrder order = mustGetNormal(id);
             if (!BizConsts.ORDER_PENDING.equals(order.getStatus())) {
@@ -96,6 +108,10 @@ public class OrderService {
             insertItems(id, req.getItems());
             operationLogger.log("ORDER", order.getId(), "UPDATE", req.getRequestNo(),
                     "变更服务单 " + order.getOrderNo());
+            log.info("变更服务单 orderNo={} 客户={} 电话={} 日期={} 时段={}",
+                    order.getOrderNo(), SensitiveMasker.maskName(order.getCustomerName()),
+                    SensitiveMasker.maskPhone(order.getCustomerPhone()),
+                    order.getServiceDate(), order.getTimeSlot());
             return toVO(order);
         });
     }
@@ -103,12 +119,14 @@ public class OrderService {
     public OrderVO voidOrder(Long id, VoidRequest req) {
         return idempotencyService.run(req.getRequestNo(), "ORDER_VOID", OrderVO.class, () -> {
             ServiceOrder order = mustGetNormal(id);
+            TraceContext.bindOrderNo(order.getOrderNo());
             order.setRecordStatus(BizConsts.RECORD_VOIDED);
             order.setLastRequestNo(req.getRequestNo());
             orderMapper.updateById(order);
             voidItems(id, BizConsts.VOID_BY_ORDER);
             operationLogger.log("ORDER", order.getId(), "VOID", req.getRequestNo(),
                     "冲销服务单 " + order.getOrderNo());
+            log.info("冲销服务单 orderNo={}", order.getOrderNo());
             return toVO(order);
         });
     }
@@ -116,6 +134,7 @@ public class OrderService {
     public OrderVO restore(Long id, VoidRequest req) {
         return idempotencyService.run(req.getRequestNo(), "ORDER_RESTORE", OrderVO.class, () -> {
             ServiceOrder order = mustGet(id);
+            TraceContext.bindOrderNo(order.getOrderNo());
             if (!BizConsts.RECORD_VOIDED.equals(order.getRecordStatus())) {
                 throw new IllegalArgumentException("单据未冲销，无需恢复");
             }
@@ -130,6 +149,7 @@ public class OrderService {
                     .set(ServiceOrderItem::getVoidCause, null));
             operationLogger.log("ORDER", order.getId(), "RESTORE", req.getRequestNo(),
                     "恢复服务单 " + order.getOrderNo());
+            log.info("恢复服务单 orderNo={}", order.getOrderNo());
             return toVO(order);
         });
     }
@@ -140,6 +160,7 @@ public class OrderService {
     public OrderVO assign(Long id, AssignRequest req) {
         return idempotencyService.run(req.getRequestNo(), "ORDER_ASSIGN", OrderVO.class, () -> {
             ServiceOrder order = mustGetNormal(id);
+            TraceContext.bindOrderNo(order.getOrderNo());
             if (!BizConsts.ORDER_PENDING.equals(order.getStatus())) {
                 throw new IllegalArgumentException("仅待派单状态可派单");
             }
@@ -151,6 +172,9 @@ public class OrderService {
             orderMapper.updateById(order);
             operationLogger.log("ORDER", order.getId(), "ASSIGN", req.getRequestNo(),
                     "派单给 " + staff.getName() + "，日期 " + order.getServiceDate() + " " + order.getTimeSlot());
+            log.info("派单 orderNo={} 人员={} staffId={} 日期={} 时段={}",
+                    order.getOrderNo(), SensitiveMasker.maskName(staff.getName()), staff.getId(),
+                    order.getServiceDate(), order.getTimeSlot());
             return toVO(order);
         });
     }
@@ -161,6 +185,7 @@ public class OrderService {
     public OrderVO reschedule(Long id, RescheduleRequest req) {
         return idempotencyService.run(req.getRequestNo(), "ORDER_RESCHEDULE", OrderVO.class, () -> {
             ServiceOrder order = mustGetNormal(id);
+            TraceContext.bindOrderNo(order.getOrderNo());
             LocalDate from = order.getServiceDate();
             LocalDate actual = req.getServiceDate();
             String detail;
@@ -176,6 +201,7 @@ public class OrderService {
             order.setLastRequestNo(req.getRequestNo());
             orderMapper.updateById(order);
             operationLogger.log("ORDER", order.getId(), "RESCHEDULE", req.getRequestNo(), detail);
+            log.info("改期 orderNo={} {}", order.getOrderNo(), detail);
             return toVO(order);
         });
     }
@@ -184,6 +210,7 @@ public class OrderService {
      * 组合检索：工单号 + 服务日期，至少提供一个条件。
      */
     public List<OrderVO> search(String orderNo, LocalDate date, boolean includeVoided) {
+        TraceContext.bindOrderNo(orderNo);
         if (!StringUtils.hasText(orderNo) && date == null) {
             throw new IllegalArgumentException("工单号与日期至少提供一个");
         }
